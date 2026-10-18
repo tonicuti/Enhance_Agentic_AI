@@ -19,5 +19,5 @@ Return answers in the agreed JSON format with traceable citations.
 - Ask first before changing the field names or source representation.
 - Never fabricate citations.
 
-## Open Decisions
-Whether the eventual interaction layer is CLI, API, or UI; response validation library.
+## Implementation
+The Streamlit interface renders the `context` and links from `sources`. `RagAnswer` provides the shared contract, and validation allows only canonicalized URLs present in retrieved evidence.

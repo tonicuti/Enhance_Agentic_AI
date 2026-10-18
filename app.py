@@ -1,78 +1,104 @@
 """Streamlit chat interface for the internal document RAG system."""
 
+from __future__ import annotations
+
+import logging
+from urllib.parse import urlsplit
+
 import streamlit as st
 
+from agentic_ai_for_enterprise.application import RagApplication
+from agentic_ai_for_enterprise.config import ConfigurationError, PipelineConfig, Settings
 
-st.set_page_config(
-    page_title="Knowledge Assistant",
-    page_icon="📚",
-    layout="wide",
-)
+# Streamlit chat components and link buttons: https://docs.streamlit.io/develop/api-reference/chat
+# https://docs.streamlit.io/develop/api-reference/widgets/st.link_button
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+LOGGER = logging.getLogger(__name__)
+
+st.set_page_config(page_title="Knowledge Assistant", page_icon="📚", layout="wide")
+
+
+@st.cache_resource(show_spinner=False)
+def _application_for_backend(backend: str) -> RagApplication:
+    """Reuse configured service clients across Streamlit reruns."""
+    return RagApplication(
+        backend=backend,
+        settings=Settings.from_env(),
+        pipeline=PipelineConfig.load(),
+    )
+
+
+def _render_message(message: dict[str, object], message_index: int) -> None:
+    role = str(message.get("role", "assistant"))
+    with st.chat_message(role):
+        st.write(str(message.get("context", "")))
+        sources = message.get("sources", [])
+        if isinstance(sources, list) and sources:
+            st.caption("Sources")
+            for source_index, url in enumerate(sources):
+                parts = urlsplit(str(url))
+                st.link_button(
+                    parts.netloc or "Source article",
+                    str(url),
+                    key=f"source-{message_index}-{source_index}",
+                )
+
 
 st.title("Knowledge Assistant")
 st.caption("Ask questions across the indexed document collection.")
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 with st.sidebar:
     st.header("Retrieval settings")
-
-    backend = st.selectbox(
+    backend_label = st.selectbox(
         "RAG system",
         options=["Vector RAG · Pinecone", "Graph RAG · Neo4j"],
         key="retrieval_backend",
-        help="Choose which retrieval pipeline to use once the backend is connected.",
+        help="Choose the internal document retrieval backend.",
     )
-
+    backend = "vector" if backend_label.startswith("Vector") else "graph"
     st.divider()
-    st.warning(
-        "The chat interface is ready, but retrieval and answer generation are not "
-        "connected yet. Submitted questions will show a setup notice instead of a "
-        "document answer."
-    )
-
-    # The current Streamlit button API uses width="stretch" for full width.
-    # Source: https://docs.streamlit.io/1.64.0/develop/api-reference/widgets/st.button
     if st.button("Clear conversation", width="stretch"):
         st.session_state.messages = []
 
-
-def render_message(message: dict[str, object]) -> None:
-    """Render one stored chat message and any source links it contains."""
-    role = str(message["role"])
-    with st.chat_message(role):
-        st.text(str(message["content"]))
-        if role == "assistant" and "backend" in message:
-            st.caption(str(message["backend"]))
-        sources = message.get("sources", [])
-        if isinstance(sources, list) and sources:
-            st.caption("Sources")
-            for source_url in sources:
-                # Render model-provided citations as plain text, not Markdown.
-                st.text(str(source_url))
-
-
-# Streamlit chat messages and input provide the conversational layout.
-# Source: https://docs.streamlit.io/develop/api-reference/chat
-for stored_message in st.session_state.messages:
-    render_message(stored_message)
+for message_index, stored_message in enumerate(st.session_state.messages):
+    _render_message(stored_message, message_index)
 
 if not st.session_state.messages:
     st.info("Start with a question about the documents in the corpus.")
 
 prompt = st.chat_input("Ask a question about the documents", max_chars=4000)
 if prompt:
-    user_message = {"role": "user", "content": prompt}
-    assistant_message = {
-        "role": "assistant",
-        "content": (
-            "The retrieval pipeline is not connected yet, so I can’t answer from "
-            "the documents. The selected backend is ready for integration."
-        ),
-        "backend": backend,
-        "sources": [],
-    }
-    st.session_state.messages.extend([user_message, assistant_message])
-    render_message(user_message)
-    render_message(assistant_message)
+    st.session_state.messages.append({"role": "user", "context": prompt})
+    _render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
+    with st.chat_message("assistant"):
+        try:
+            with st.status("Searching the indexed documents…", expanded=False):
+                result = _application_for_backend(backend).answer(prompt, mode="agentic")
+            assistant_message = result.answer.to_dict()
+        except ConfigurationError as exc:
+            assistant_message = {"role": "assistant", "context": str(exc), "sources": []}
+        except Exception as exc:
+            LOGGER.warning("RAG request failed for backend %s (%s).", backend, type(exc).__name__)
+            assistant_message = {
+                "role": "assistant",
+                "context": (
+                    "Retrieval is temporarily unavailable. Check that the selected "
+                    "Ollama and database services are configured and running."
+                ),
+                "sources": [],
+            }
+        st.write(assistant_message["context"])
+        sources = assistant_message.get("sources", [])
+        if sources:
+            st.caption("Sources")
+            for source_index, url in enumerate(sources):
+                parts = urlsplit(str(url))
+                st.link_button(
+                    parts.netloc or "Source article",
+                    str(url),
+                    key=f"source-{len(st.session_state.messages)}-{source_index}",
+                )
+    st.session_state.messages.append(assistant_message)

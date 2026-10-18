@@ -16,5 +16,5 @@ Input records require `title`, `url`, and `body`. Output documents/chunks retain
 - Ask first before changing canonicalization or malformed-record policy after indexing begins.
 - Never use evaluation `evidence_list` to modify corpus records.
 
-## Open Decisions
-Python version, canonical URL rules, splitter implementation, chunk size, and overlap.
+## Implementation choices
+The implementation uses Python 3.12+, canonicalizes absolute HTTP(S) URLs by normalizing host/default ports, sorting query parameters, removing fragments and trailing path slashes, and derives stable SHA-256 document and chunk IDs. LangChain `RecursiveCharacterTextSplitter` uses 1,000-character chunks with 150-character overlap by default; all settings are configurable in `configs/default.json`.

@@ -4,7 +4,7 @@
 Provide a Streamlit user interface for asking corpus questions and viewing grounded answers and sources.
 
 ## Interface
-The user can submit a question, select Vector RAG (Pinecone) or Graph RAG (Neo4j), and view the answer plus article URLs. The UI uses the selected pipeline's frozen configuration and does not expose a reranker control; reranker on/off comparisons are performed by the benchmark. Until a retrieval service is implemented, the UI must show a clear setup notice and must not fabricate an answer. The first implementation is `app.py` using Streamlit 1.59 or newer (below 2.0).
+The user can submit a question, select Vector RAG (Pinecone) or Graph RAG (Neo4j), and view the answer plus article URLs. The UI uses the selected pipeline's frozen configuration and does not expose a reranker control; reranker on/off comparisons are performed by the benchmark. It calls the bounded ReAct application service and shows concise setup or service errors without fabricating an answer. The implementation is `app.py` using Streamlit 1.59 or newer (below 2.0).
 
 ## Success Criteria
 - The chat UI does not let users change reranking state per request.

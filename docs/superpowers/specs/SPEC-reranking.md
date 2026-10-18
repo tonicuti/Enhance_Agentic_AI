@@ -16,5 +16,5 @@ Accept ranked candidates and an explicit `reranker_enabled: bool` setting from b
 - Ask first before changing the reranker model or introducing backend-specific reranking.
 - Never lose source provenance during reranking.
 
-## Open Decisions
-Exact Ollama/LangChain invocation and which setting the benchmark selects.
+## Implementation choices
+The LangChain `ChatOllama` integration sends the Qwen3 yes/no relevance prompt and uses available yes/no token probabilities, with a validated yes/no text fallback. Benchmark selection is recorded in `configs/default.json`; reranker enabled/disabled comparisons remain evaluation-only.

@@ -1,0 +1,16 @@
+{
+  "selected_backend": "vector",
+  "reranker_enabled": false,
+  "chunk_size": 1000,
+  "chunk_overlap": 150,
+  "candidate_depth": 20,
+  "context_depth": 5,
+  "reranker_depth": 20,
+  "graph_traversal_depth": 2,
+  "react_max_steps": 4,
+  "max_context_characters": 18000,
+  "split_seed": 42,
+  "development_fraction": 0.7,
+  "validation_fraction": 0.15,
+  "test_fraction": 0.15
+}

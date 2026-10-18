@@ -1,0 +1,27 @@
+[project]
+name = "agentic-ai-for-enterprise"
+version = "0.1.0"
+description = "Hybrid vector and graph RAG system with evaluation and ReAct retrieval"
+readme = "README.md"
+authors = [
+    { email = "daonguyenduylong9.219.20@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.0,<2.0",
+    "langchain-ollama>=1.0,<2.0",
+    "langchain-pinecone>=0.2,<1.0",
+    "langchain-text-splitters>=1.0,<2.0",
+    "neo4j>=5.28,<7.0",
+    "pinecone>=6.0,<8.0",
+    "pydantic>=2.7,<3.0",
+    "python-dotenv>=1.0,<2.0",
+    "streamlit>=1.59.0,<2.0",
+]
+
+[project.scripts]
+agentic-ai-for-enterprise = "agentic_ai_for_enterprise:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"

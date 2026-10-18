@@ -17,5 +17,5 @@ Load query, answer, question type, and evidence URLs; call a configured retrieva
 - Ask first before selecting a single weighted score when the measures conflict.
 - Never tune against held-out test results or use evidence labels for indexing.
 
-## Open Decisions
-Split ratios/seed, metric implementation details, and run artifact format.
+## Implementation choices
+The benchmark uses stratified 70/15/15 development/validation/test partitions with seed 42 and writes a membership manifest, per-question JSONL records, condition summaries, and an aggregate summary beneath ignored `artifacts/benchmark/` output. Test questions are rejected for tune and compare phases.

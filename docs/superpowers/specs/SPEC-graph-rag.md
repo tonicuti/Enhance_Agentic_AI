@@ -17,5 +17,5 @@ Accept corpus documents/chunks; use `qwen3:1.7b` for entity/relation extraction;
 - Ask first before adding vector search inside the graph variant, since that changes the comparison.
 - Never ingest gold evidence labels into Neo4j.
 
-## Open Decisions
-Graph schema, entity resolution, relation confidence handling, traversal depth, and Neo4j deployment.
+## Implementation choices
+The Neo4j graph stores `Article`, `Chunk`, and `Entity` nodes with provenance-linked `HAS_CHUNK`, `MENTIONS`, and `RELATED` relationships. Entity IDs are stable hashes of normalized name and type; relation confidence contributes to candidate ranking. Query traversal is bounded to the configured depth (1-4, default 2). Neo4j URI, database, and credentials are supplied through environment variables.

@@ -16,5 +16,5 @@ The agent receives a question and uses the benchmark-selected, frozen reranker c
 - Ask first before changing the selected retriever or prompt strategy after final benchmark configuration is frozen.
 - Never cite a URL that was not returned by the retrieval tool.
 
-## Open Decisions
-ReAct prompt wording, step limit, stopping criteria, context budget, and whether query decomposition is explicit.
+## Implementation choices
+The explicit prompt uses Thought/Action/Action Input/Observation/Final Answer format. The default maximum is four retrieval actions. Final citations use chunk IDs observed from the tool, then map to verified article URLs. If the loop ends without a valid final answer, the system generates a grounded fallback from accumulated evidence or returns an insufficient-evidence answer.

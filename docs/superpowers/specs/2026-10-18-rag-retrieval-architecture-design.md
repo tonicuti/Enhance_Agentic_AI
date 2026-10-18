@@ -65,19 +65,19 @@ Reranker on/off is an evaluation setting. Benchmark tuning compares both modes w
 - Ollama reranker model: `dengcao/Qwen3-Reranker-0.6B:Q8_0`.
 - Pinecone for the vector-backed variant.
 - Neo4j for the graph-backed variant.
-- Python is the proposed implementation language, subject to confirmation before implementation.
+- Python 3.12 or newer is the implementation language, following the repository scaffold.
 
 ## Proposed Commands
 
 These are target CLI contracts; module/package names and flags should be finalized in the implementation plan:
 
 ```powershell
-python -m rag_system.index --backend vector
-python -m rag_system.index --backend graph
-python -m rag_system.benchmark --phase tune --backend both --split development --reranker both
-python -m rag_system.benchmark --phase compare --backend both --split validation --reranker both
-python -m rag_system.benchmark --phase final --compare standard,agentic --backend selected --split test --reranker selected
-python -m rag_system.chat --backend selected
+python -m agentic_ai_for_enterprise.index --backend vector
+python -m agentic_ai_for_enterprise.index --backend graph
+python -m agentic_ai_for_enterprise.benchmark --phase tune --backend both --split development --reranker both
+python -m agentic_ai_for_enterprise.benchmark --phase compare --backend both --split validation --reranker both
+python -m agentic_ai_for_enterprise.benchmark --phase final --compare standard,agentic --backend selected --split test --reranker selected
+python -m streamlit run app.py
 ```
 
 ## Proposed Project Structure
@@ -85,7 +85,7 @@ python -m rag_system.chat --backend selected
 ```text
 data/                         Existing corpus and evaluation JSON files
 configs/                      Model, splitter, retrieval, and evaluation settings
-src/rag_system/               Application package
+src/agentic_ai_for_enterprise/ Application package
   ingestion/                   Validation, normalization, chunking
   retrievers/vector/            Pinecone indexing and retrieval
   retrievers/graph/             Neo4j extraction, indexing, and retrieval
@@ -94,9 +94,6 @@ src/rag_system/               Application package
   agent/                        ReAct tools and orchestration
   response/                     JSON response validation
 app.py                         Streamlit chat entry point
-tests/unit/                     Offline unit tests
-tests/integration/              Optional-service integration tests
-tests/e2e/                      Small end-to-end pipeline checks
 artifacts/                      Ignored local run results and generated indexes
 ```
 
@@ -130,7 +127,7 @@ The result contract makes benchmark scoring and citation generation independent 
 - End-to-end check: run a small fixed set through standard RAG, then through ReAct after integration.
 - Full benchmark: run only after the split and configurations are frozen; persist per-question outputs and run metadata.
 
-No tests or external services are run as part of this architecture draft.
+Automated tests and external services are outside this implementation's verification scope unless requested; implementation checks use compilation and CLI help without contacting external services.
 
 ## Boundaries
 
