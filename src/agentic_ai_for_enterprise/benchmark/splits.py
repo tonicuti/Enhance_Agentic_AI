@@ -44,12 +44,13 @@ def split_questions(questions: list[BenchmarkQuestion], config: PipelineConfig) 
 
     for split in assigned.values():
         split.sort(key=lambda item: item.question_id)
-    split_fingerprint = hashlib.sha256(
+    split_payload = (
         f"{config.split_seed}:{config.development_fraction}:{config.validation_fraction}:"
         f"{config.test_fraction}:" + ",".join(
             f"{key}={membership[key]}" for key in sorted(membership)
         )
-    ).hexdigest()
+    )
+    split_fingerprint = hashlib.sha256(split_payload.encode("utf-8")).hexdigest()
     return DatasetSplits(
         development=tuple(assigned["development"]),
         validation=tuple(assigned["validation"]),

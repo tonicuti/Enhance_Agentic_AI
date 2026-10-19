@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ..application import RagApplication
 from ..config import PipelineConfig, Settings
-from ..contracts import BenchmarkQuestion, PipelineResult
-from .metrics import QuestionMetrics, score_run
+from ..contracts import BenchmarkQuestion, PipelineResult, RetrievalTrace
+from .metrics import QuestionMetrics, RetrievalMetrics, score_retrieval, score_run
 
 
 LOGGER = logging.getLogger(__name__)
@@ -53,8 +53,12 @@ def run_condition(
             if question.question_id in completed:
                 continue
             LOGGER.info("%s / %s: question %d of %d", backend, mode, number, len(questions))
-            result = application.answer(question.query, mode=mode)
-            metrics = score_run(question, result)
+            if mode == "retrieval":
+                result = application.retrieve(question.query)
+                metrics = score_retrieval(question, result)
+            else:
+                result = application.answer(question.query, mode=mode)
+                metrics = score_run(question, result)
             row = _question_row(
                 question=question,
                 result=result,
@@ -76,7 +80,7 @@ def run_condition(
     finally:
         application.close()
 
-    summary = _aggregate(existing)
+    summary = _aggregate(existing, mode=mode)
     summary.update(
         {
             "run_id": run_id,
@@ -100,8 +104,8 @@ def run_condition(
 def _question_row(
     *,
     question: BenchmarkQuestion,
-    result: PipelineResult,
-    metrics: QuestionMetrics,
+    result: PipelineResult | RetrievalTrace,
+    metrics: QuestionMetrics | RetrievalMetrics,
     run_key: str,
     run_id: str,
     phase: str,
@@ -111,13 +115,12 @@ def _question_row(
     pipeline: PipelineConfig,
     settings: Settings,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "run_id": run_id,
         "run_key": run_key,
         "question_id": question.question_id,
         "question_type": question.question_type,
         "query": question.query,
-        "gold_answer": question.answer,
         "gold_evidence_urls": list(question.evidence_urls),
         "phase": phase,
         "split": split_name,
@@ -126,11 +129,9 @@ def _question_row(
         "reranker_enabled": pipeline.reranker_enabled,
         "configuration": asdict(pipeline),
         "models": {
-            "generation": settings.generation_model,
             "embedding": settings.embedding_model,
             "reranker": settings.reranker_model if pipeline.reranker_enabled else None,
         },
-        "response": result.answer.to_dict(),
         "retrieved_evidence": [
             {
                 "rank": rank,
@@ -147,6 +148,13 @@ def _question_row(
         "metrics": metrics.to_dict(),
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
+    if isinstance(result, PipelineResult):
+        row["gold_answer"] = question.answer
+        row["models"]["generation"] = settings.generation_model
+        row["response"] = result.answer.to_dict()
+    if backend == "graph":
+        row["models"]["query_extraction"] = settings.generation_model
+    return row
 
 
 def _read_resume_rows(path: Path, run_key: str) -> list[dict[str, Any]]:
@@ -174,10 +182,11 @@ def _run_key(**values: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _aggregate(rows: list[dict[str, Any]], *, mode: str) -> dict[str, Any]:
     if not rows:
         return {"question_count": 0, "metrics": {}}
-    names = tuple(QuestionMetrics.__dataclass_fields__)
+    metric_type = RetrievalMetrics if mode == "retrieval" else QuestionMetrics
+    names = tuple(metric_type.__dataclass_fields__)
     means: dict[str, float] = {}
     totals: dict[str, int] = {}
     for name in names:
@@ -186,8 +195,10 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
             totals[name] = sum(int(value) for value in values)
         else:
             means[name] = sum(float(value) for value in values) / len(values)
-    return {
+    summary = {
         "question_count": len(rows),
         "metrics": {**means, **totals},
-        "answer_and_evidence_quality_are_reported_separately": True,
     }
+    if mode != "retrieval":
+        summary["answer_and_evidence_quality_are_reported_separately"] = True
+    return summary

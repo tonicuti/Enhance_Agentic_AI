@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from .agent import answer_with_react
 from .config import DEFAULT_CONFIG_PATH, PipelineConfig, Settings
-from .contracts import PipelineResult, RetrievedPassage, Retriever
+from .contracts import PipelineResult, RetrievedPassage, RetrievalTrace, Retriever
 from .reranking import OllamaReranker, rerank
 from .response import generate_answer
 
@@ -91,6 +91,20 @@ class RagApplication:
         self.pipeline = replace(pipeline, selected_backend=backend)
         self.pipeline.validate()
         self.retriever = get_retriever(backend, settings, self.pipeline)
+
+    def retrieve(self, question: str) -> RetrievalTrace:
+        """Run configured retrieval and reranking without generating an answer."""
+        if not isinstance(question, str) or not question.strip() or len(question) > 4000:
+            raise ValueError("Question must contain between 1 and 4000 characters.")
+        started = time.perf_counter()
+        model_calls_before = self.retriever.model_call_count
+        passages = self.retriever.retrieve(question, self.pipeline.candidate_depth)
+        return RetrievalTrace(
+            passages=tuple(passages),
+            retrieval_calls=1,
+            model_calls=self.retriever.model_call_count - model_calls_before,
+            elapsed_seconds=time.perf_counter() - started,
+        )
 
     def answer(self, question: str, *, mode: str = "agentic") -> PipelineResult:
         if not isinstance(question, str) or not question.strip() or len(question) > 4000:

@@ -39,11 +39,10 @@ def main() -> int:
     pipeline = PipelineConfig.load(args.config)
     settings = Settings.from_env()
     backend_choice = args.backend or ("selected" if args.phase == "final" else "both")
-    split_name = args.split or {"tune": "development", "compare": "validation", "final": "test"}[args.phase]
-    if args.phase == "final" and split_name != "test":
-        raise SystemExit("The final phase must use the held-out test split.")
-    if args.phase != "final" and split_name == "test":
-        raise SystemExit("Test split is held out and cannot be used for tuning or comparison.")
+    expected_split = {"tune": "development", "compare": "validation", "final": "test"}[args.phase]
+    split_name = args.split or expected_split
+    if split_name != expected_split:
+        raise SystemExit(f"The {args.phase} phase must use the {expected_split} split.")
     if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be at least 1.")
     questions, dataset_fingerprint = load_questions(args.dataset)
@@ -125,7 +124,9 @@ def _select_rerankers(choice: str, pipeline: PipelineConfig, phase: str) -> list
 
 
 def _select_modes(phase: str, compare: str) -> list[str]:
-    if phase != "final":
+    if phase == "tune":
+        return ["retrieval"]
+    if phase == "compare":
         return ["standard"]
     modes = [item.strip() for item in compare.split(",") if item.strip()]
     if not modes or any(mode not in {"standard", "agentic"} for mode in modes):

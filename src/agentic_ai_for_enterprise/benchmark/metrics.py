@@ -8,13 +8,30 @@ import string
 from collections import Counter
 from dataclasses import asdict, dataclass
 
-from ..contracts import BenchmarkQuestion, PipelineResult
+from ..contracts import BenchmarkQuestion, PipelineResult, RetrievalTrace
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalMetrics:
+    evidence_recall_at_5: float
+    evidence_recall_at_10: float
+    precision_at_5: float
+    precision_at_10: float
+    ndcg_at_10: float
+    latency_seconds: float
+    retrieval_calls: int
+    model_calls: int
+
+    def to_dict(self) -> dict[str, float | int]:
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
 class QuestionMetrics:
     evidence_recall_at_5: float
     evidence_recall_at_10: float
+    precision_at_5: float
+    precision_at_10: float
     ndcg_at_10: float
     answer_exact_match: float
     answer_token_f1: float
@@ -29,17 +46,34 @@ class QuestionMetrics:
 
 
 def score_run(question: BenchmarkQuestion, result: PipelineResult) -> QuestionMetrics:
+    retrieval = score_retrieval(question, result)
     gold_urls = set(question.evidence_urls)
-    retrieved_urls = _unique_urls([passage.url for passage in result.passages])
     cited_urls = _unique_urls(result.answer.sources)
     return QuestionMetrics(
-        evidence_recall_at_5=_recall(retrieved_urls[:5], gold_urls),
-        evidence_recall_at_10=_recall(retrieved_urls[:10], gold_urls),
-        ndcg_at_10=_ndcg(retrieved_urls[:10], gold_urls),
+        evidence_recall_at_5=retrieval.evidence_recall_at_5,
+        evidence_recall_at_10=retrieval.evidence_recall_at_10,
+        precision_at_5=retrieval.precision_at_5,
+        precision_at_10=retrieval.precision_at_10,
+        ndcg_at_10=retrieval.ndcg_at_10,
         answer_exact_match=float(normalize_answer(result.answer.context) == normalize_answer(question.answer)),
         answer_token_f1=token_f1(result.answer.context, question.answer),
         citation_precision=(len(set(cited_urls) & gold_urls) / len(set(cited_urls))) if cited_urls else 0.0,
         citation_recall=_recall(cited_urls, gold_urls),
+        latency_seconds=retrieval.latency_seconds,
+        retrieval_calls=retrieval.retrieval_calls,
+        model_calls=retrieval.model_calls,
+    )
+
+
+def score_retrieval(question: BenchmarkQuestion, result: RetrievalTrace | PipelineResult) -> RetrievalMetrics:
+    gold_urls = set(question.evidence_urls)
+    retrieved_urls = _unique_urls([passage.url for passage in result.passages])
+    return RetrievalMetrics(
+        evidence_recall_at_5=_recall(retrieved_urls[:5], gold_urls),
+        evidence_recall_at_10=_recall(retrieved_urls[:10], gold_urls),
+        precision_at_5=_precision(retrieved_urls[:5], gold_urls, 5),
+        precision_at_10=_precision(retrieved_urls[:10], gold_urls, 10),
+        ndcg_at_10=_ndcg(retrieved_urls[:10], gold_urls),
         latency_seconds=result.elapsed_seconds,
         retrieval_calls=result.retrieval_calls,
         model_calls=result.model_calls,
@@ -71,6 +105,10 @@ def _unique_urls(urls: list[str]) -> list[str]:
 
 def _recall(retrieved: list[str], relevant: set[str]) -> float:
     return len(set(retrieved) & relevant) / len(relevant) if relevant else 0.0
+
+
+def _precision(retrieved: list[str], relevant: set[str], k: int) -> float:
+    return len(set(retrieved[:k]) & relevant) / k
 
 
 def _ndcg(retrieved: list[str], relevant: set[str]) -> float:

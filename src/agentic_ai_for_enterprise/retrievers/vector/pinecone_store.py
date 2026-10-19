@@ -65,7 +65,7 @@ class PineconeRetriever:
         self.ensure_index(create_if_missing=True)
         documents = [Document(page_content=chunk.text, metadata=_chunk_metadata(chunk)) for chunk in chunks]
         assert self.vector_store is not None
-        self.vector_store.add_documents(documents=documents, ids=[chunk.chunk_id for chunk in chunks])
+        self.vector_store.add_documents(documents=documents, ids=[chunk.chunk_id for chunk in chunks], embedding_chunk_size = 32)
         return len(chunks)
 
     def retrieve(self, query: str, limit: int) -> list[RetrievedPassage]:

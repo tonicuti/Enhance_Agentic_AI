@@ -45,9 +45,9 @@ python -m agentic_ai_for_enterprise.index --backend both
 
 Indexing reads only the corpus file. The defaults are `data/corpus.json`, `configs/default.json`, 1,000-character chunks, and 150-character overlap. Re-running indexing uses stable article/chunk IDs and updates the existing records.
 
-## Evaluate retrieval
+## Benchmark retrieval and answers
 
-The benchmark deterministically stratifies questions by `question_type` into development, validation, and held-out test partitions (70/15/15, seed 42). Development runs tune retrieval choices; validation runs compare candidates; the test partition is reserved for the final comparison.
+The benchmark deterministically stratifies questions by `question_type` into development, validation, and held-out test partitions (70/15/15, seed 42). Development runs evaluate retrieval and reranking only; they do not generate answers. Validation runs compare complete RAG pipelines, including answer and citation quality. The test partition is reserved for the final comparison. Each phase uses its corresponding split.
 
 Run a development sweep across vector and graph retrieval, with reranking off and on:
 
@@ -61,7 +61,7 @@ Compare candidates on validation:
 python -m agentic_ai_for_enterprise.benchmark --phase compare --backend both --split validation --reranker both
 ```
 
-After reviewing evidence and answer metrics together, set the chosen backend and frozen reranker state in `configs/default.json`. The final command compares standard RAG with Agentic RAG on the same held-out questions:
+Use development retrieval metrics to narrow the candidates, then review evidence and answer metrics on validation. Set the chosen backend and frozen reranker state in `configs/default.json`. The final command compares standard RAG with Agentic RAG on the same held-out questions:
 
 ```powershell
 python -m agentic_ai_for_enterprise.benchmark --phase final --backend selected --split test --reranker selected
@@ -69,7 +69,7 @@ python -m agentic_ai_for_enterprise.benchmark --phase final --backend selected -
 
 For a short operational smoke run, add `--limit 10`. You can set `--run-id <name>` to resume a partially completed matching run. Do not use a limited run to select a winning configuration.
 
-Each run writes a split manifest, per-question JSONL records, condition summaries, and an aggregate summary under `artifacts/benchmark/<run-id>/`. Reports include Evidence Recall@5/10, nDCG@10, normalized answer exact match, token F1, citation precision/recall, latency, and retrieval/model-call counts. Evidence and answer quality are reported separately; there is no weighted winner score.
+Each run writes a split manifest, per-question JSONL records, condition summaries, and an aggregate summary under `artifacts/benchmark/<run-id>/`. Development reports contain Evidence Recall@5/10, Precision@5/10, nDCG@10, latency, and retrieval/model-call counts. They have `mode: retrieval` and contain no generated response or answer-quality metrics. Validation and final reports also include normalized answer exact match, token F1, and citation precision/recall. Evidence and answer quality are reported separately; there is no weighted winner score.
 
 ## Chat
 
