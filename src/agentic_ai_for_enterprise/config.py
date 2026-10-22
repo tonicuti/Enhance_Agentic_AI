@@ -23,6 +23,8 @@ class ConfigurationError(ValueError):
 class PipelineConfig:
     selected_backend: str = "vector"
     reranker_enabled: bool = False
+    hybrid_bm25_index_path: str = "artifacts/index/hybrid_bm25.sqlite3"
+    fusion_constant: int = 60
     chunk_size: int = 1000
     chunk_overlap: int = 150
     candidate_depth: int = 20
@@ -35,6 +37,11 @@ class PipelineConfig:
     development_fraction: float = 0.7
     validation_fraction: float = 0.15
     test_fraction: float = 0.15
+
+    @property
+    def bm25_index_path(self) -> Path:
+        path = Path(self.hybrid_bm25_index_path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> PipelineConfig:
@@ -71,14 +78,19 @@ class PipelineConfig:
             "react_max_steps",
             "max_context_characters",
             "split_seed",
+            "fusion_constant",
         ):
             if isinstance(getattr(self, name), bool) or not isinstance(getattr(self, name), int):
                 raise ConfigurationError(f"{name} must be an integer.")
         for name in ("development_fraction", "validation_fraction", "test_fraction"):
             if isinstance(getattr(self, name), bool) or not isinstance(getattr(self, name), (int, float)):
                 raise ConfigurationError(f"{name} must be a number.")
-        if self.selected_backend not in {"vector", "graph"}:
-            raise ConfigurationError("selected_backend must be 'vector' or 'graph'.")
+        if self.selected_backend not in {"vector", "graph", "hybrid"}:
+            raise ConfigurationError("selected_backend must be 'vector', 'graph', or 'hybrid'.")
+        if not isinstance(self.hybrid_bm25_index_path, str) or not self.hybrid_bm25_index_path.strip():
+            raise ConfigurationError("hybrid_bm25_index_path must be a non-empty path string.")
+        if self.fusion_constant < 1:
+            raise ConfigurationError("fusion_constant must be at least 1.")
         if self.chunk_size < 1 or self.chunk_overlap < 0 or self.chunk_overlap >= self.chunk_size:
             raise ConfigurationError("Chunk size must be positive and overlap smaller than chunk size.")
         for name in ("candidate_depth", "context_depth", "reranker_depth", "react_max_steps", "max_context_characters"):
@@ -98,6 +110,7 @@ class Settings:
     generation_model: str
     embedding_model: str
     reranker_model: str
+    reranker_base_url: str
     pinecone_api_key: str | None
     pinecone_index_name: str | None
     pinecone_namespace: str
@@ -127,27 +140,39 @@ class Settings:
             return default
 
         values: dict[str, Any] = {
-            "ollama_base_url": str(value("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/"),
-            "generation_model": value("GENERATION_MODEL", "qwen3:1.7b"),
-            "embedding_model": value("EMBEDDING_MODEL", "embeddinggemma:latest"),
-            "reranker_model": value("RERANKER_MODEL", "dengcao/Qwen3-Reranker-0.6B:Q8_0"),
+            "ollama_base_url": str(value("OLLAMA_BASE_URL")).rstrip("/"),
+            "generation_model": value("GENERATION_MODEL"),
+            "embedding_model": value("EMBEDDING_MODEL"),
+            "reranker_model": value("RERANKER_MODEL"),
+            "reranker_base_url": value("RERANKER_BASE_URL"),
             "pinecone_api_key": value("PINECONE_API_KEY") or None,
-            "pinecone_index_name": value("PINECONE_INDEX_NAME", alternate="PINECONE_NAME_INDEX") or None,
-            "pinecone_namespace": value("PINECONE_NAMESPACE", "enterprise-corpus"),
-            "pinecone_cloud": value("PINECONE_CLOUD", "aws"),
-            "pinecone_region": value("PINECONE_REGION", "us-east-1"),
+            "pinecone_index_name": value("PINECONE_NAME_INDEX") or None,
+            "pinecone_namespace": value("PINECONE_NAMESPACE") or None,
+            "pinecone_cloud": value("PINECONE_CLOUD"),
+            "pinecone_region": value("PINECONE_REGION"),
             "neo4j_uri": value("NEO4J_URI") or None,
             "neo4j_username": value("NEO4J_USERNAME", alternate="NEO4J_USER") or None,
             "neo4j_password": value("NEO4J_PASSWORD") or None,
             "neo4j_database": value("NEO4J_DATABASE", "neo4j"),
             "request_timeout_seconds": _int_value(value("REQUEST_TIMEOUT_SECONDS", "120"), "REQUEST_TIMEOUT_SECONDS"),
         }
-        for name in ("generation_model", "embedding_model", "reranker_model", "pinecone_cloud", "pinecone_region", "neo4j_database"):
+        for name in (
+            "generation_model",
+            "embedding_model",
+            "reranker_model",
+            "reranker_base_url",
+            "pinecone_cloud",
+            "pinecone_region",
+            "neo4j_database",
+        ):
             if not values[name]:
                 raise ConfigurationError(f"{name} must not be empty.")
+        values["reranker_base_url"] = str(values["reranker_base_url"]).rstrip("/")
         settings = cls(**values)
         if not settings.ollama_base_url.startswith(("http://", "https://")):
             raise ConfigurationError("OLLAMA_BASE_URL must use http:// or https://.")
+        if not settings.reranker_base_url.startswith(("http://", "https://")):
+            raise ConfigurationError("RERANKER_BASE_URL must use http:// or https://.")
         if settings.pinecone_cloud not in {"aws", "gcp", "azure"}:
             raise ConfigurationError("PINECONE_CLOUD must be one of aws, gcp, or azure.")
         if settings.request_timeout_seconds < 1 or settings.request_timeout_seconds > 900:

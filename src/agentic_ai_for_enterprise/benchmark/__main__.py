@@ -20,11 +20,11 @@ LOGGER = logging.getLogger("rag_system.benchmark")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("tune", "compare", "final"), required=True)
-    parser.add_argument("--backend", choices=("vector", "graph", "both", "selected"))
+    parser.add_argument("--phase", choices=("tune", "compare", "final", "hybrid"), required=True)
+    parser.add_argument("--backend", choices=("vector", "graph", "hybrid", "both", "selected"))
     parser.add_argument("--split", choices=("development", "validation", "test"))
     parser.add_argument("--reranker", choices=("enabled", "disabled", "both", "selected"), default="both")
-    parser.add_argument("--compare", default="standard,agentic")
+    parser.add_argument("--compare", help="Generation modes for compare/final phases (standard,agentic).")
     parser.add_argument("--limit", type=int, help="Run only the first N questions from the deterministic split.")
     parser.add_argument("--run-id", help="Reuse this ID to resume matching JSONL results.")
     parser.add_argument("--dataset", type=Path, default=PROJECT_ROOT / "data" / "MultiHopRAG.json")
@@ -38,8 +38,15 @@ def main() -> int:
     args = build_parser().parse_args()
     pipeline = PipelineConfig.load(args.config)
     settings = Settings.from_env()
-    backend_choice = args.backend or ("selected" if args.phase == "final" else "both")
-    expected_split = {"tune": "development", "compare": "validation", "final": "test"}[args.phase]
+    backend_choice = args.backend or (
+        "selected" if args.phase == "final" else "hybrid" if args.phase == "hybrid" else "both"
+    )
+    expected_split = {
+        "tune": "development",
+        "compare": "validation",
+        "final": "test",
+        "hybrid": "development",
+    }[args.phase]
     split_name = args.split or expected_split
     if split_name != expected_split:
         raise SystemExit(f"The {args.phase} phase must use the {expected_split} split.")
@@ -55,6 +62,10 @@ def main() -> int:
 
     if args.phase == "final" and backend_choice == "both":
         raise SystemExit("The final phase uses one selected backend; choose --backend selected.")
+    if args.phase == "hybrid" and backend_choice != "hybrid":
+        raise SystemExit("The hybrid phase requires --backend hybrid.")
+    if args.phase == "hybrid" and args.reranker == "selected":
+        raise SystemExit("The hybrid phase requires --reranker enabled, disabled, or both.")
     backends = _select_backends(backend_choice, pipeline)
     reranker_modes = _select_rerankers(args.reranker, pipeline, args.phase)
     modes = _select_modes(args.phase, args.compare)
@@ -123,17 +134,19 @@ def _select_rerankers(choice: str, pipeline: PipelineConfig, phase: str) -> list
     return [choice == "enabled"]
 
 
-def _select_modes(phase: str, compare: str) -> list[str]:
+def _select_modes(phase: str, compare: str | None) -> list[str]:
     if phase == "tune":
         return ["retrieval"]
-    if phase == "compare":
-        return ["standard"]
-    modes = [item.strip() for item in compare.split(",") if item.strip()]
+    if phase == "hybrid":
+        if compare is not None:
+            raise SystemExit("The hybrid phase is retrieval-only and does not accept --compare.")
+        return ["retrieval_quality"]
+    modes = [item.strip() for item in (compare or "standard,agentic").split(",") if item.strip()]
     if not modes or any(mode not in {"standard", "agentic"} for mode in modes):
         raise SystemExit("--compare must be a comma-separated selection of standard,agentic.")
-    if set(modes) != {"standard", "agentic"}:
+    if phase == "final" and set(modes) != {"standard", "agentic"}:
         raise SystemExit("The final phase compares standard and agentic RAG together.")
-    return ["standard", "agentic"]
+    return list(dict.fromkeys(modes))
 
 
 if __name__ == "__main__":

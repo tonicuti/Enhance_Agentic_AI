@@ -54,11 +54,17 @@ with st.sidebar:
     st.header("Retrieval settings")
     backend_label = st.selectbox(
         "RAG system",
-        options=["Vector RAG · Pinecone", "Graph RAG · Neo4j"],
+        options=["Vector RAG · Pinecone", "Graph RAG · Neo4j", "Hybrid RAG · Pinecone + BM25"],
         key="retrieval_backend",
         help="Choose the internal document retrieval backend.",
     )
-    backend = "vector" if backend_label.startswith("Vector") else "graph"
+    backend = (
+        "vector"
+        if backend_label.startswith("Vector")
+        else "graph"
+        if backend_label.startswith("Graph")
+        else "hybrid"
+    )
     st.divider()
     if st.button("Clear conversation", width="stretch"):
         st.session_state.messages = []

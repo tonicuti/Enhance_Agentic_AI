@@ -9,3 +9,11 @@
 - Completion: implemented Tasks 1-8 in the plan, including config/contracts, Pinecone and Neo4j pipelines, benchmark split manifest and metrics, reranking, grounded answer citations, bounded ReAct, Streamlit chat, and operator docs.
 - Verification: Python compilation passed; index and benchmark CLI help loaded from the installed uv environment; Neo4j adapter import succeeded. No automated tests or external model/database services were run.
 - Dependency resolution: refreshed uv.lock and synchronized the declared dependencies into the existing .venv after the user-approved implementation; the workspace .env was not edited.
+
+## Hybrid BM25 + Vector follow-up (2026-10-22)
+
+- Design: approved in `docs/superpowers/specs/2026-10-22-hybrid-bm25-vector-design.md`.
+- Implementation plan: `docs/superpowers/plans/2026-10-22-hybrid-bm25-vector.md`.
+- Implementation: SQLite FTS5 BM25 + Pinecone candidate retrieval, RRF fusion, existing BGE reranker after fusion, and a quality-only `hybrid` benchmark phase.
+- Constraint: do not calculate hybrid-phase latency, retrieval-call counts, or model-call counts; do not run inference or automated tests.
+- Verification: Python compilation and CLI help only; no index build or benchmark run.

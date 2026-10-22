@@ -11,8 +11,15 @@ from typing import Any
 
 from ..application import RagApplication
 from ..config import PipelineConfig, Settings
-from ..contracts import BenchmarkQuestion, PipelineResult, RetrievalTrace
-from .metrics import QuestionMetrics, RetrievalMetrics, score_retrieval, score_run
+from ..contracts import BenchmarkQuestion, PipelineResult, RetrievalQualityTrace, RetrievalTrace
+from .metrics import (
+    QuestionMetrics,
+    RetrievalMetrics,
+    RetrievalQualityMetrics,
+    score_retrieval,
+    score_retrieval_quality,
+    score_run,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -53,7 +60,11 @@ def run_condition(
             if question.question_id in completed:
                 continue
             LOGGER.info("%s / %s: question %d of %d", backend, mode, number, len(questions))
-            if mode == "retrieval":
+            if mode == "retrieval_quality":
+                passages = application.retrieve_passages(question.query, track_model_calls=False)
+                result = RetrievalQualityTrace(passages=passages)
+                metrics = score_retrieval_quality(question, passages)
+            elif mode == "retrieval":
                 result = application.retrieve(question.query)
                 metrics = score_retrieval(question, result)
             else:
@@ -104,8 +115,8 @@ def run_condition(
 def _question_row(
     *,
     question: BenchmarkQuestion,
-    result: PipelineResult | RetrievalTrace,
-    metrics: QuestionMetrics | RetrievalMetrics,
+    result: PipelineResult | RetrievalQualityTrace | RetrievalTrace,
+    metrics: QuestionMetrics | RetrievalQualityMetrics | RetrievalMetrics,
     run_key: str,
     run_id: str,
     phase: str,
@@ -144,7 +155,7 @@ def _question_row(
             }
             for rank, passage in enumerate(result.passages, start=1)
         ],
-        "retrieval_actions": list(result.actions),
+        "retrieval_actions": list(getattr(result, "actions", ())),
         "metrics": metrics.to_dict(),
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -185,7 +196,13 @@ def _run_key(**values: Any) -> str:
 def _aggregate(rows: list[dict[str, Any]], *, mode: str) -> dict[str, Any]:
     if not rows:
         return {"question_count": 0, "metrics": {}}
-    metric_type = RetrievalMetrics if mode == "retrieval" else QuestionMetrics
+    metric_type = (
+        RetrievalQualityMetrics
+        if mode == "retrieval_quality"
+        else RetrievalMetrics
+        if mode == "retrieval"
+        else QuestionMetrics
+    )
     names = tuple(metric_type.__dataclass_fields__)
     means: dict[str, float] = {}
     totals: dict[str, int] = {}
@@ -199,6 +216,6 @@ def _aggregate(rows: list[dict[str, Any]], *, mode: str) -> dict[str, Any]:
         "question_count": len(rows),
         "metrics": {**means, **totals},
     }
-    if mode != "retrieval":
+    if mode not in {"retrieval", "retrieval_quality"}:
         summary["answer_and_evidence_quality_are_reported_separately"] = True
     return summary

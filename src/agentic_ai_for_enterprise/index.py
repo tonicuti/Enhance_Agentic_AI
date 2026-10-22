@@ -15,7 +15,7 @@ LOGGER = logging.getLogger("rag_system.index")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("vector", "graph", "both"), required=True)
+    parser.add_argument("--backend", choices=("vector", "graph", "hybrid", "both"), required=True)
     parser.add_argument("--corpus", type=Path, default=PROJECT_ROOT / "data" / "corpus.json")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     return parser
@@ -40,7 +40,7 @@ def main() -> int:
             from .retrievers.vector import PineconeRetriever
 
             indexed = PineconeRetriever(settings).index(chunks)
-        else:
+        elif backend == "graph":
             from .retrievers.graph import Neo4jGraphStore
             from .retrievers.graph.extraction import extract_graph_records
 
@@ -55,6 +55,22 @@ def main() -> int:
                 indexed = store.index(indexable_chunks, graph_records)
             finally:
                 store.close()
+        else:
+            from .retrievers.bm25 import SQLiteBM25Store
+            from .retrievers.vector import PineconeRetriever
+
+            vector_indexed = PineconeRetriever(settings).index(chunks)
+            bm25_store = SQLiteBM25Store(pipeline.bm25_index_path)
+            try:
+                bm25_indexed = bm25_store.index(chunks)
+            finally:
+                bm25_store.close()
+            LOGGER.info(
+                "Indexed %d chunks into Pinecone and %d chunks into the local BM25 index.",
+                vector_indexed,
+                bm25_indexed,
+            )
+            continue
         LOGGER.info("Indexed %d chunks into the %s backend.", indexed, backend)
     return 0
 

@@ -6,9 +6,10 @@ import math
 import re
 import string
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
-from ..contracts import BenchmarkQuestion, PipelineResult, RetrievalTrace
+from ..contracts import BenchmarkQuestion, PipelineResult, RetrievedPassage, RetrievalTrace
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,18 @@ class RetrievalMetrics:
     model_calls: int
 
     def to_dict(self) -> dict[str, float | int]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalQualityMetrics:
+    evidence_recall_at_5: float
+    evidence_recall_at_10: float
+    precision_at_5: float
+    precision_at_10: float
+    ndcg_at_10: float
+
+    def to_dict(self) -> dict[str, float]:
         return asdict(self)
 
 
@@ -77,6 +90,22 @@ def score_retrieval(question: BenchmarkQuestion, result: RetrievalTrace | Pipeli
         latency_seconds=result.elapsed_seconds,
         retrieval_calls=result.retrieval_calls,
         model_calls=result.model_calls,
+    )
+
+
+def score_retrieval_quality(
+    question: BenchmarkQuestion,
+    passages: Sequence[RetrievedPassage],
+) -> RetrievalQualityMetrics:
+    """Compute evidence ranking metrics without measuring latency or call counts."""
+    gold_urls = set(question.evidence_urls)
+    retrieved_urls = _unique_urls([passage.url for passage in passages])
+    return RetrievalQualityMetrics(
+        evidence_recall_at_5=_recall(retrieved_urls[:5], gold_urls),
+        evidence_recall_at_10=_recall(retrieved_urls[:10], gold_urls),
+        precision_at_5=_precision(retrieved_urls[:5], gold_urls, 5),
+        precision_at_10=_precision(retrieved_urls[:10], gold_urls, 10),
+        ndcg_at_10=_ndcg(retrieved_urls[:10], gold_urls),
     )
 
 

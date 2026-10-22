@@ -1,60 +1,83 @@
-"""Score candidates with the configured Qwen3 text reranker via Ollama chat."""
+"""Score candidates with the configured BGE text reranker via llama.cpp."""
 
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Sequence
-
-from langchain_ollama import ChatOllama
+from json import JSONDecodeError, dumps, loads
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from ..config import Settings
 from ..contracts import RetrievedPassage
 
 
-RERANK_INSTRUCTION = "Given a user question, determine whether the passage answers it."
-RERANK_SYSTEM = (
-    'Judge whether the Document meets the requirements based on the Query and Instruct. '
-    'The answer must be only "yes" or "no".'
-)
-
-
 class OllamaReranker:
     def __init__(self, settings: Settings) -> None:
-        self.llm = ChatOllama(
-            model=settings.reranker_model,
-            base_url=settings.ollama_base_url,
-            temperature=0,
-            logprobs=True,
-            top_logprobs=20,
-            num_predict=1,
-            timeout=settings.request_timeout_seconds,
-        )
+        self.endpoint = f"{settings.reranker_base_url.rstrip('/')}/v1/rerank"
+        self.model = settings.reranker_model
+        self.timeout = settings.request_timeout_seconds
 
     def score(self, query: str, passage: RetrievedPassage) -> float:
-        message = self.llm.invoke(
-            [
-                ("system", RERANK_SYSTEM),
-                (
-                    "human",
-                    f"<Instruct>: {RERANK_INSTRUCTION}\n\n"
-                    f"<Query>: {query}\n\n<Document>: {passage.text}",
-                ),
-            ]
+        return self._score_many(query, [passage])[0]
+
+    def _score_many(self, query: str, passages: Sequence[RetrievedPassage]) -> list[float]:
+        if not passages:
+            return []
+        body = dumps(
+            {
+                "model": self.model,
+                "query": query,
+                "documents": [passage.text for passage in passages],
+                "top_n": len(passages),
+            }
+        ).encode("utf-8")
+        request = Request(
+            self.endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        # ChatOllama exposes token log probabilities through response metadata.
-        # API reference: https://docs.langchain.com/oss/python/integrations/chat/ollama#log-probabilities
-        probabilities = _yes_no_probabilities(message.response_metadata.get("logprobs"))
-        if probabilities is not None:
-            yes_logprob, no_logprob = probabilities
-            max_logprob = max(yes_logprob, no_logprob)
-            yes_score = math.exp(yes_logprob - max_logprob)
-            no_score = math.exp(no_logprob - max_logprob)
-            return yes_score / (yes_score + no_score)
-        decision = _yes_no_decision(str(message.content))
-        if decision is None:
-            raise RuntimeError("The configured Ollama reranker returned neither a yes/no score nor a yes/no answer.")
-        return 1.0 if decision else 0.0
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Reranker request to {self.endpoint} failed with HTTP {exc.code}: {detail or exc.reason}"
+            ) from exc
+        except URLError as exc:
+            raise RuntimeError(f"Could not reach reranker endpoint {self.endpoint}: {exc.reason}") from exc
+        except TimeoutError as exc:
+            raise RuntimeError(f"Reranker request to {self.endpoint} timed out after {self.timeout} seconds.") from exc
+        except (JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError(f"Reranker endpoint {self.endpoint} returned invalid JSON: {exc}") from exc
+
+        if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+            raise RuntimeError(f"Reranker endpoint {self.endpoint} returned no results array.")
+        results = payload["results"]
+        if len(results) != len(passages):
+            raise RuntimeError(
+                f"Reranker endpoint {self.endpoint} returned {len(results)} results for {len(passages)} passages."
+            )
+
+        scores: dict[int, float] = {}
+        for result in results:
+            if not isinstance(result, dict):
+                raise RuntimeError(f"Reranker endpoint {self.endpoint} returned a malformed result entry.")
+            index = result.get("index")
+            score = result.get("relevance_score")
+            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(passages):
+                raise RuntimeError(f"Reranker endpoint {self.endpoint} returned an invalid result index: {index!r}.")
+            if index in scores:
+                raise RuntimeError(f"Reranker endpoint {self.endpoint} returned duplicate result index {index}.")
+            if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+                raise RuntimeError(f"Reranker endpoint {self.endpoint} returned an invalid relevance score for index {index}.")
+            scores[index] = float(score)
+
+        if len(scores) != len(passages):
+            raise RuntimeError(f"Reranker endpoint {self.endpoint} omitted one or more passage scores.")
+        return [scores[index] for index in range(len(passages))]
 
 
 def rerank(
@@ -74,7 +97,15 @@ def rerank(
         raise ValueError("reranker_depth must be at least 1")
     reranker = ranker or OllamaReranker(settings)
     prefix = ordered[:reranker_depth]
-    scored = [(index, item, reranker.score(query, item)) for index, item in enumerate(prefix)]
+    batch_score = getattr(reranker, "_score_many", None)
+    scores = (
+        batch_score(query, prefix)
+        if callable(batch_score)
+        else [reranker.score(query, item) for item in prefix]
+    )
+    if len(scores) != len(prefix):
+        raise RuntimeError(f"Reranker returned {len(scores)} scores for {len(prefix)} passages.")
+    scored = [(index, item, score) for index, (item, score) in enumerate(zip(prefix, scores, strict=True))]
     scored.sort(key=lambda result: (-result[2], result[0]))
     reranked = [
         RetrievedPassage(
@@ -87,37 +118,8 @@ def rerank(
             source=item.source,
             category=item.category,
             chunk_index=item.chunk_index,
-            score_type="qwen3_reranker_yes_probability",
+            score_type="bge_reranker_relevance",
         )
         for _, item, score in scored
     ]
     return reranked + ordered[reranker_depth:]
-
-
-def _yes_no_probabilities(logprobs: object) -> tuple[float, float] | None:
-    if not isinstance(logprobs, list) or not logprobs:
-        return None
-    first = logprobs[0]
-    if not isinstance(first, dict):
-        return None
-    alternatives = first.get("top_logprobs")
-    if not isinstance(alternatives, list):
-        return None
-    scores: dict[str, float] = {}
-    for alternative in alternatives:
-        if not isinstance(alternative, dict):
-            continue
-        token = str(alternative.get("token", "")).strip().casefold()
-        logprob = alternative.get("logprob")
-        if token in {"yes", "no"} and isinstance(logprob, (int, float)):
-            scores[token] = float(logprob)
-    if "yes" not in scores or "no" not in scores:
-        return None
-    return scores["yes"], scores["no"]
-
-
-def _yes_no_decision(content: str) -> bool | None:
-    token = re.match(r"\s*(yes|no)\b", content, flags=re.IGNORECASE)
-    if token is None:
-        return None
-    return token.group(1).casefold() == "yes"

@@ -73,6 +73,13 @@ class RetrievalTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievalQualityTrace:
+    """Ranked passages only, for benchmark phases that omit runtime accounting."""
+
+    passages: tuple[RetrievedPassage, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineResult:
     answer: RagAnswer
     passages: tuple[RetrievedPassage, ...]

@@ -186,3 +186,13 @@
 - Selection when evidence and answer metrics disagree remains governed by the approved spec: report the tradeoff and do not invent a weighted winner.
 - Pinecone cloud/index deployment and Neo4j instance/credentials are operator configuration; defaults belong in `.env.example`, not source.
 - The implementation defaults for splitter, retrieval depth, ReAct limit, and dataset split are recorded above and can be tuned by the benchmark.
+
+## Follow-up: Hybrid BM25 + Vector Retrieval
+
+The approved follow-up design and implementation plan are `docs/superpowers/specs/2026-10-22-hybrid-bm25-vector-design.md` and `docs/superpowers/plans/2026-10-22-hybrid-bm25-vector.md`.
+
+- [x] Add local SQLite FTS5 BM25 indexing alongside Pinecone vector indexing.
+- [x] Fuse vector and BM25 candidates with RRF before applying the configured reranker.
+- [x] Make the hybrid backend selectable in standard and ReAct chat retrieval.
+- [x] Add a development-only hybrid retrieval benchmark reporting Evidence Recall@5/10, Precision@5/10, and nDCG@10 only.
+- [x] Update operator documentation and the capability map.

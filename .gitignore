@@ -24,6 +24,7 @@ ENV/
 # Local application and benchmark artifacts
 artifacts/
 *.log
+docs/
 
 # Tool caches and coverage output
 .pytest_cache/

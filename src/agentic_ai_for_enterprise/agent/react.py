@@ -62,6 +62,7 @@ def answer_with_react(
         base_url=settings.ollama_base_url,
         temperature=0,
         num_predict=512,
+        reasoning=False,
         timeout=settings.request_timeout_seconds,
     )
 
@@ -72,6 +73,8 @@ def answer_with_react(
         query = query.strip()
         if not query or len(query) > 1000:
             return "Invalid retrieval query. Provide 1 to 1000 characters."
+        if retrieval_calls >= pipeline.react_max_steps:
+            return "Retrieval limit reached. Use the evidence already retrieved to answer."
         retrieval_calls += 1
         retrieval_queries.append(query)
         passages = retriever.retrieve(query, pipeline.candidate_depth)
@@ -92,7 +95,17 @@ def answer_with_react(
         return json.dumps(compact, ensure_ascii=False)
 
     tool_map = {retrieve_internal_evidence.name: retrieve_internal_evidence}
-    prompt = REACT_SYSTEM_PROMPT.replace("{max_steps}", str(pipeline.react_max_steps))
+    prompt = REACT_SYSTEM_PROMPT.replace("{max_steps}", str(max(pipeline.react_max_steps - 1, 0)))
+    try:
+        initial_observation = retrieve_internal_evidence.invoke({"query": question})
+    except Exception:
+        LOGGER.warning("Initial ReAct retrieval failed.")
+        initial_observation = "Retrieval failed. Try a shorter, focused query."
+    observations.append(
+        "Action: retrieve_internal_evidence\n"
+        f"Action Input: {json.dumps({'query': question})}\n"
+        f"Observation: {initial_observation}"
+    )
     for _ in range(pipeline.react_max_steps):
         history = "\n\n".join(observations)
         response = llm.invoke(
@@ -109,6 +122,12 @@ def answer_with_react(
         text = _content_text(response.content)
         final = _parse_final_answer(text)
         if final is not None:
+            if retrieval_calls == 0:
+                observations.append(
+                    "Observation: You have not searched for evidence yet. Call "
+                    "retrieve_internal_evidence with a focused query before answering."
+                )
+                continue
             answer = _answer_from_final(final, seen)
             return AgentRun(
                 answer=answer,

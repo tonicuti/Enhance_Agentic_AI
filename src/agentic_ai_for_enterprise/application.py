@@ -26,12 +26,19 @@ class ConfiguredRetriever:
         self.model_call_count = 0
         self._ranker: OllamaReranker | None = None
 
-    def retrieve(self, query: str, limit: int) -> list[RetrievedPassage]:
+    def retrieve(
+        self,
+        query: str,
+        limit: int,
+        *,
+        track_model_calls: bool = True,
+    ) -> list[RetrievedPassage]:
         candidates = self.backend.retrieve(query, limit)
-        if getattr(self.backend, "is_graph_backend", False):
+        if track_model_calls and getattr(self.backend, "is_graph_backend", False):
             self.model_call_count += 1
         if self.pipeline.reranker_enabled and candidates:
-            self.model_call_count += min(len(candidates), self.pipeline.reranker_depth)
+            if track_model_calls:
+                self.model_call_count += min(len(candidates), self.pipeline.reranker_depth)
             if self._ranker is None:
                 self._ranker = OllamaReranker(self.settings)
         return rerank(
@@ -58,8 +65,12 @@ def get_retriever(backend: str, settings: Settings, pipeline: PipelineConfig) ->
         from .retrievers.graph import Neo4jGraphStore
 
         base = _GraphRetriever(Neo4jGraphStore(settings), pipeline.graph_traversal_depth)
+    elif backend == "hybrid":
+        from .retrievers.hybrid import HybridRetriever
+
+        base = HybridRetriever(settings, pipeline)
     else:
-        raise ValueError("backend must be 'vector' or 'graph'")
+        raise ValueError("backend must be 'vector', 'graph', or 'hybrid'")
     return ConfiguredRetriever(base, settings=settings, pipeline=pipeline)
 
 
@@ -104,6 +115,23 @@ class RagApplication:
             retrieval_calls=1,
             model_calls=self.retriever.model_call_count - model_calls_before,
             elapsed_seconds=time.perf_counter() - started,
+        )
+
+    def retrieve_passages(
+        self,
+        question: str,
+        *,
+        track_model_calls: bool = True,
+    ) -> tuple[RetrievedPassage, ...]:
+        """Return ranked passages without timing; callers can suppress model-call accounting."""
+        if not isinstance(question, str) or not question.strip() or len(question) > 4000:
+            raise ValueError("Question must contain between 1 and 4000 characters.")
+        return tuple(
+            self.retriever.retrieve(
+                question,
+                self.pipeline.candidate_depth,
+                track_model_calls=track_model_calls,
+            )
         )
 
     def answer(self, question: str, *, mode: str = "agentic") -> PipelineResult:
